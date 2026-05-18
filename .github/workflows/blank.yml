@@ -1,0 +1,494 @@
+name: Build OpenWrt - JioRouter AX6000 JIDU6101
+
+on:
+  workflow_dispatch:
+    inputs:
+      clean_build:
+        description: 'Force clean build (ignore cache)'
+        required: false
+        default: 'false'
+        type: boolean
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/build-openwrt.yml'
+
+jobs:
+  build:
+    name: Build OpenWrt Firmware
+    runs-on: ubuntu-22.04
+    timeout-minutes: 360
+
+    steps:
+      # ── 1. Free up disk space ─────────────────────────────────────────────
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+                      /usr/local/share/boost "$AGENT_TOOLSDIRECTORY"
+          sudo apt-get clean
+          df -h
+
+      # ── 2. Install build dependencies ─────────────────────────────────────
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y \
+            build-essential gcc g++ make libncurses-dev zlib1g-dev \
+            gawk gettext libssl-dev xsltproc zip file subversion \
+            jq tar bzip2 unzip wget git rsync python3 python3-setuptools \
+            swig quilt ccache
+
+      # ── 3. Clone OpenWrt & checkout PR #22201 ─────────────────────────────
+      - name: Clone OpenWrt repository
+        run: |
+          git clone https://github.com/openwrt/openwrt.git
+          cd openwrt
+          git checkout master
+          git fetch origin pull/22201/head:pr22201
+          git checkout pr22201
+
+      # ── 4. Cache feeds & build tools ──────────────────────────────────────
+      - name: Cache feeds
+        uses: actions/cache@v4
+        with:
+          path: |
+            openwrt/feeds
+            openwrt/staging_dir/host
+            openwrt/staging_dir/hostpkg
+            openwrt/build_dir/host
+            openwrt/build_dir/hostpkg
+          key: openwrt-feeds-pr22201-${{ hashFiles('openwrt/feeds.conf.default') }}
+          restore-keys: openwrt-feeds-pr22201-
+
+      # ── 5. Update & install feeds ──────────────────────────────────────────
+      - name: Update and install feeds
+        working-directory: openwrt
+        run: |
+          ./scripts/feeds update -a
+          ./scripts/feeds install -a
+
+      # ── 6. Write .config ──────────────────────────────────────────────────
+      - name: Write .config
+        working-directory: openwrt
+        run: |
+          cat > .config << 'EOF'
+          # Target
+          CONFIG_TARGET_mediatek=y
+          CONFIG_TARGET_mediatek_filogic=y
+          CONFIG_TARGET_mediatek_filogic_DEVICE_jiorouter_ax6000-jidu6101=y
+
+          # Base System
+          CONFIG_PACKAGE_base-files=y
+          CONFIG_PACKAGE_block-mount=y
+          CONFIG_PACKAGE_blockd=y
+          CONFIG_PACKAGE_busybox=y
+          CONFIG_PACKAGE_ca-bundle=y
+          CONFIG_PACKAGE_cgi-io=y
+          CONFIG_PACKAGE_dnsmasq=y
+          CONFIG_PACKAGE_dropbear=y
+          CONFIG_PACKAGE_e2fsprogs=y
+          CONFIG_PACKAGE_f2fsck=y
+          CONFIG_PACKAGE_firewall4=y
+          CONFIG_PACKAGE_fstools=y
+          CONFIG_PACKAGE_fwtool=y
+          CONFIG_PACKAGE_getrandom=y
+          CONFIG_PACKAGE_hostapd-common=y
+          CONFIG_PACKAGE_ip-tiny=y
+          CONFIG_PACKAGE_ip6tables-nft=y
+          CONFIG_PACKAGE_iperf3=y
+          CONFIG_PACKAGE_ipset=y
+          CONFIG_PACKAGE_iptables-mod-conntrack-extra=y
+          CONFIG_PACKAGE_iptables-mod-extra=y
+          CONFIG_PACKAGE_iptables-mod-ipopt=y
+          CONFIG_PACKAGE_iptables-nft=y
+          CONFIG_PACKAGE_iw=y
+          CONFIG_PACKAGE_jshn=y
+          CONFIG_PACKAGE_jsonfilter=y
+          CONFIG_PACKAGE_kernel=y
+          CONFIG_PACKAGE_logd=y
+          CONFIG_PACKAGE_mkf2fs=y
+          CONFIG_PACKAGE_mount-utils=y
+          CONFIG_PACKAGE_mtd=y
+          CONFIG_PACKAGE_mwan3=y
+          CONFIG_PACKAGE_nano=y
+          CONFIG_PACKAGE_netifd=y
+          CONFIG_PACKAGE_nftables-json=y
+          CONFIG_PACKAGE_nlbwmon=y
+          CONFIG_PACKAGE_odhcp6c=y
+          CONFIG_PACKAGE_odhcpd-ipv6only=y
+          CONFIG_PACKAGE_openssl-util=y
+          CONFIG_PACKAGE_openwrt-keyring=y
+          CONFIG_PACKAGE_ppp=y
+          CONFIG_PACKAGE_ppp-mod-pppoe=y
+          CONFIG_PACKAGE_procd=y
+          CONFIG_PACKAGE_procd-seccomp=y
+          CONFIG_PACKAGE_procd-ujail=y
+          CONFIG_PACKAGE_resolveip=y
+          CONFIG_PACKAGE_rpcd=y
+          CONFIG_PACKAGE_rpcd-mod-file=y
+          CONFIG_PACKAGE_rpcd-mod-iwinfo=y
+          CONFIG_PACKAGE_rpcd-mod-luci=y
+          CONFIG_PACKAGE_rpcd-mod-rpcsys=y
+          CONFIG_PACKAGE_rpcd-mod-rrdns=y
+          CONFIG_PACKAGE_rpcd-mod-ucode=y
+          CONFIG_PACKAGE_sqm-scripts=y
+          CONFIG_PACKAGE_tc-tiny=y
+          CONFIG_PACKAGE_terminfo=y
+          CONFIG_PACKAGE_ubi-utils=y
+          CONFIG_PACKAGE_uboot-envtools=y
+          CONFIG_PACKAGE_ubox=y
+          CONFIG_PACKAGE_ubus=y
+          CONFIG_PACKAGE_ubusd=y
+          CONFIG_PACKAGE_uci=y
+          CONFIG_PACKAGE_uclient-fetch=y
+          CONFIG_PACKAGE_ucode=y
+          CONFIG_PACKAGE_ucode-mod-digest=y
+          CONFIG_PACKAGE_ucode-mod-fs=y
+          CONFIG_PACKAGE_ucode-mod-html=y
+          CONFIG_PACKAGE_ucode-mod-log=y
+          CONFIG_PACKAGE_ucode-mod-math=y
+          CONFIG_PACKAGE_ucode-mod-nl80211=y
+          CONFIG_PACKAGE_ucode-mod-rtnl=y
+          CONFIG_PACKAGE_ucode-mod-ubus=y
+          CONFIG_PACKAGE_ucode-mod-uci=y
+          CONFIG_PACKAGE_ucode-mod-uloop=y
+          CONFIG_PACKAGE_uhttpd=y
+          CONFIG_PACKAGE_uhttpd-mod-ubus=y
+          CONFIG_PACKAGE_urandom-seed=y
+          CONFIG_PACKAGE_urngd=y
+          CONFIG_PACKAGE_usign=y
+          CONFIG_PACKAGE_vnstat2=y
+          CONFIG_PACKAGE_vnstati2=y
+          CONFIG_PACKAGE_wifi-scripts=y
+          CONFIG_PACKAGE_wireguard-tools=y
+          CONFIG_PACKAGE_wireless-regdb=y
+          CONFIG_PACKAGE_wpad-openssl=y
+          CONFIG_PACKAGE_xtables-nft=y
+          CONFIG_PACKAGE_zlib=y
+          CONFIG_PACKAGE_zram-swap=y
+
+          # Firmware
+          CONFIG_PACKAGE_eip197-mini-firmware=y
+          CONFIG_PACKAGE_mt7916-firmware=y
+          CONFIG_PACKAGE_mt7986-firmware=y
+          CONFIG_PACKAGE_mt7986-wo-firmware=y
+          CONFIG_PACKAGE_r8152-firmware=y
+
+          # Kernel Modules - Crypto
+          CONFIG_PACKAGE_kmod-br-netfilter=y
+          CONFIG_PACKAGE_kmod-cfg80211=y
+          CONFIG_PACKAGE_kmod-crypto-acompress=y
+          CONFIG_PACKAGE_kmod-crypto-aead=y
+          CONFIG_PACKAGE_kmod-crypto-authenc=y
+          CONFIG_PACKAGE_kmod-crypto-blake2b=y
+          CONFIG_PACKAGE_kmod-crypto-ccm=y
+          CONFIG_PACKAGE_kmod-crypto-cmac=y
+          CONFIG_PACKAGE_kmod-crypto-crc32c=y
+          CONFIG_PACKAGE_kmod-crypto-ctr=y
+          CONFIG_PACKAGE_kmod-crypto-des=y
+          CONFIG_PACKAGE_kmod-crypto-gcm=y
+          CONFIG_PACKAGE_kmod-crypto-geniv=y
+          CONFIG_PACKAGE_kmod-crypto-gf128=y
+          CONFIG_PACKAGE_kmod-crypto-ghash=y
+          CONFIG_PACKAGE_kmod-crypto-hash=y
+          CONFIG_PACKAGE_kmod-crypto-hmac=y
+          CONFIG_PACKAGE_kmod-crypto-hw-safexcel=y
+          CONFIG_PACKAGE_kmod-crypto-kpp=y
+          CONFIG_PACKAGE_kmod-crypto-lib-chacha20=y
+          CONFIG_PACKAGE_kmod-crypto-lib-chacha20poly1305=y
+          CONFIG_PACKAGE_kmod-crypto-lib-curve25519=y
+          CONFIG_PACKAGE_kmod-crypto-lib-poly1305=y
+          CONFIG_PACKAGE_kmod-crypto-manager=y
+          CONFIG_PACKAGE_kmod-crypto-md5=y
+          CONFIG_PACKAGE_kmod-crypto-null=y
+          CONFIG_PACKAGE_kmod-crypto-rng=y
+          CONFIG_PACKAGE_kmod-crypto-seqiv=y
+          CONFIG_PACKAGE_kmod-crypto-sha1=y
+          CONFIG_PACKAGE_kmod-crypto-sha256=y
+          CONFIG_PACKAGE_kmod-crypto-sha3=y
+          CONFIG_PACKAGE_kmod-crypto-sha512=y
+          CONFIG_PACKAGE_kmod-crypto-xxhash=y
+
+          # Kernel Modules - Filesystems
+          CONFIG_PACKAGE_kmod-fs-autofs4=y
+          CONFIG_PACKAGE_kmod-fs-btrfs=y
+          CONFIG_PACKAGE_kmod-fs-ext4=y
+          CONFIG_PACKAGE_kmod-fs-ntfs3=y
+
+          # Kernel Modules - Tunnels
+          CONFIG_PACKAGE_kmod-fou=y
+          CONFIG_PACKAGE_kmod-fou6=y
+          CONFIG_PACKAGE_kmod-geneve=y
+          CONFIG_PACKAGE_kmod-gre=y
+          CONFIG_PACKAGE_kmod-gre6=y
+          CONFIG_PACKAGE_kmod-ip6-tunnel=y
+          CONFIG_PACKAGE_kmod-ipip=y
+          CONFIG_PACKAGE_kmod-iptunnel=y
+          CONFIG_PACKAGE_kmod-iptunnel4=y
+          CONFIG_PACKAGE_kmod-iptunnel6=y
+          CONFIG_PACKAGE_kmod-mpls=y
+          CONFIG_PACKAGE_kmod-nat46=y
+          CONFIG_PACKAGE_kmod-nsh=y
+          CONFIG_PACKAGE_kmod-sit=y
+          CONFIG_PACKAGE_kmod-udptunnel4=y
+          CONFIG_PACKAGE_kmod-udptunnel6=y
+          CONFIG_PACKAGE_kmod-vxlan=y
+          CONFIG_PACKAGE_kmod-wireguard=y
+
+          # Kernel Modules - Hardware
+          CONFIG_PACKAGE_kmod-gpio-button-hotplug=y
+          CONFIG_PACKAGE_kmod-hwmon-core=y
+          CONFIG_PACKAGE_kmod-i2c-core=y
+          CONFIG_PACKAGE_kmod-ifb=y
+          CONFIG_PACKAGE_kmod-input-core=y
+          CONFIG_PACKAGE_kmod-leds-gpio=y
+          CONFIG_PACKAGE_kmod-leds-pwm=y
+          CONFIG_PACKAGE_kmod-ledtrig-gpio=y
+          CONFIG_PACKAGE_kmod-scsi-core=y
+          CONFIG_PACKAGE_kmod-sound-core=y
+          CONFIG_PACKAGE_kmod-thermal=y
+          CONFIG_PACKAGE_kmod-zram=y
+
+          # Kernel Modules - Libraries
+          CONFIG_PACKAGE_kmod-lib-crc-ccitt=y
+          CONFIG_PACKAGE_kmod-lib-crc16=y
+          CONFIG_PACKAGE_kmod-lib-crc32c=y
+          CONFIG_PACKAGE_kmod-lib-lz4=y
+          CONFIG_PACKAGE_kmod-lib-lz4-decompress=y
+          CONFIG_PACKAGE_kmod-lib-lzo=y
+          CONFIG_PACKAGE_kmod-lib-raid6=y
+          CONFIG_PACKAGE_kmod-lib-xor=y
+          CONFIG_PACKAGE_kmod-lib-xxhash=y
+          CONFIG_PACKAGE_kmod-lib-zlib-deflate=y
+          CONFIG_PACKAGE_kmod-lib-zlib-inflate=y
+          CONFIG_PACKAGE_kmod-lib-zstd=y
+
+          # Kernel Modules - Network Basic
+          CONFIG_PACKAGE_kmod-ip6tables=y
+          CONFIG_PACKAGE_kmod-libphy=y
+          CONFIG_PACKAGE_kmod-mac80211=y
+          CONFIG_PACKAGE_kmod-macvlan=y
+          CONFIG_PACKAGE_kmod-mii=y
+          CONFIG_PACKAGE_kmod-tun=y
+          CONFIG_PACKAGE_kmod-veth=y
+
+          # Kernel Modules - Netfilter
+          CONFIG_PACKAGE_kmod-ipt-conntrack=y
+          CONFIG_PACKAGE_kmod-ipt-conntrack-extra=y
+          CONFIG_PACKAGE_kmod-ipt-core=y
+          CONFIG_PACKAGE_kmod-ipt-extra=y
+          CONFIG_PACKAGE_kmod-ipt-ipopt=y
+          CONFIG_PACKAGE_kmod-ipt-ipset=y
+          CONFIG_PACKAGE_kmod-ipt-nat=y
+          CONFIG_PACKAGE_kmod-ipt-nat-extra=y
+          CONFIG_PACKAGE_kmod-ipt-nat6=y
+          CONFIG_PACKAGE_kmod-ipt-physdev=y
+          CONFIG_PACKAGE_kmod-nf-conncount=y
+          CONFIG_PACKAGE_kmod-nf-conntrack=y
+          CONFIG_PACKAGE_kmod-nf-conntrack-netlink=y
+          CONFIG_PACKAGE_kmod-nf-conntrack6=y
+          CONFIG_PACKAGE_kmod-nf-flow=y
+          CONFIG_PACKAGE_kmod-nf-ipt=y
+          CONFIG_PACKAGE_kmod-nf-ipt6=y
+          CONFIG_PACKAGE_kmod-nf-ipvs=y
+          CONFIG_PACKAGE_kmod-nf-log=y
+          CONFIG_PACKAGE_kmod-nf-log6=y
+          CONFIG_PACKAGE_kmod-nf-nat=y
+          CONFIG_PACKAGE_kmod-nf-nat6=y
+          CONFIG_PACKAGE_kmod-nf-reject=y
+          CONFIG_PACKAGE_kmod-nf-reject6=y
+          CONFIG_PACKAGE_kmod-nfnetlink=y
+          CONFIG_PACKAGE_kmod-nfnetlink-queue=y
+          CONFIG_PACKAGE_kmod-nft-compat=y
+          CONFIG_PACKAGE_kmod-nft-core=y
+          CONFIG_PACKAGE_kmod-nft-fib=y
+          CONFIG_PACKAGE_kmod-nft-nat=y
+          CONFIG_PACKAGE_kmod-nft-offload=y
+          CONFIG_PACKAGE_kmod-nft-queue=y
+          CONFIG_PACKAGE_kmod-nls-base=y
+
+          # Kernel Modules - PPP
+          CONFIG_PACKAGE_kmod-ppp=y
+          CONFIG_PACKAGE_kmod-pppoe=y
+          CONFIG_PACKAGE_kmod-pppox=y
+          CONFIG_PACKAGE_kmod-slhc=y
+
+          # Kernel Modules - QoS
+          CONFIG_PACKAGE_kmod-sched-act-sample=y
+          CONFIG_PACKAGE_kmod-sched-act-vlan=y
+          CONFIG_PACKAGE_kmod-sched-bpf=y
+          CONFIG_PACKAGE_kmod-sched-cake=y
+          CONFIG_PACKAGE_kmod-sched-connmark=y
+          CONFIG_PACKAGE_kmod-sched-core=y
+          CONFIG_PACKAGE_kmod-sched-flower=y
+
+          # Kernel Modules - USB
+          CONFIG_PACKAGE_kmod-usb-common=y
+          CONFIG_PACKAGE_kmod-usb-core=y
+          CONFIG_PACKAGE_kmod-usb-ehci=y
+          CONFIG_PACKAGE_kmod-usb-net=y
+          CONFIG_PACKAGE_kmod-usb-net-cdc-ether=y
+          CONFIG_PACKAGE_kmod-usb-net-cdc-mbim=y
+          CONFIG_PACKAGE_kmod-usb-net-cdc-ncm=y
+          CONFIG_PACKAGE_kmod-usb-net-rndis=y
+          CONFIG_PACKAGE_kmod-usb-net-rtl8150=y
+          CONFIG_PACKAGE_kmod-usb-net-rtl8152=y
+          CONFIG_PACKAGE_kmod-usb-storage=y
+          CONFIG_PACKAGE_kmod-usb-wdm=y
+          CONFIG_PACKAGE_kmod-usb-xhci-hcd=y
+          CONFIG_PACKAGE_kmod-usb-xhci-mtk=y
+          CONFIG_PACKAGE_kmod-usb2=y
+          CONFIG_PACKAGE_kmod-usb3=y
+
+          # Kernel Modules - Wireless
+          CONFIG_PACKAGE_kmod-mt76=y
+          CONFIG_PACKAGE_kmod-mt76-connac=y
+          CONFIG_PACKAGE_kmod-mt76-core=y
+          CONFIG_PACKAGE_kmod-mt7603=y
+          CONFIG_PACKAGE_kmod-mt76x02-common=y
+          CONFIG_PACKAGE_kmod-mt76x2=y
+          CONFIG_PACKAGE_kmod-mt76x2-common=y
+          CONFIG_PACKAGE_kmod-mt7915e=y
+
+          # LuCI - Core
+          CONFIG_PACKAGE_luci=y
+          CONFIG_PACKAGE_luci-app-firewall=y
+          CONFIG_PACKAGE_luci-app-mwan3=y
+          CONFIG_PACKAGE_luci-app-nlbwmon=y
+          CONFIG_PACKAGE_luci-app-package-manager=y
+          CONFIG_PACKAGE_luci-app-sqm=y
+          CONFIG_PACKAGE_luci-app-vnstat2=y
+          CONFIG_PACKAGE_luci-base=y
+          CONFIG_PACKAGE_luci-lib-chartjs=y
+          CONFIG_PACKAGE_luci-lib-jsonc=y
+          CONFIG_PACKAGE_luci-lib-uqr=y
+          CONFIG_PACKAGE_luci-light=y
+          CONFIG_PACKAGE_luci-mod-admin-full=y
+          CONFIG_PACKAGE_luci-mod-network=y
+          CONFIG_PACKAGE_luci-mod-status=y
+          CONFIG_PACKAGE_luci-mod-system=y
+          CONFIG_PACKAGE_luci-proto-ipv6=y
+          CONFIG_PACKAGE_luci-proto-ppp=y
+          CONFIG_PACKAGE_luci-proto-wireguard=y
+          CONFIG_PACKAGE_luci-theme-bootstrap=y
+
+          # Libraries
+          CONFIG_PACKAGE_libatomic1=y
+          CONFIG_PACKAGE_libblkid1=y
+          CONFIG_PACKAGE_libblobmsg-json20251208=y
+          CONFIG_PACKAGE_libblobmsg-json20260213=y
+          CONFIG_PACKAGE_libc=y
+          CONFIG_PACKAGE_libcomerr0=y
+          CONFIG_PACKAGE_libe2p2=y
+          CONFIG_PACKAGE_libext2fs2=y
+          CONFIG_PACKAGE_libf2fs6=y
+          CONFIG_PACKAGE_libgcc1=y
+          CONFIG_PACKAGE_libgd=y
+          CONFIG_PACKAGE_libiperf3=y
+          CONFIG_PACKAGE_libipset13=y
+          CONFIG_PACKAGE_libiwinfo-data=y
+          CONFIG_PACKAGE_libiwinfo20230701=y
+          CONFIG_PACKAGE_libjpeg-turbo=y
+          CONFIG_PACKAGE_libjson-c5=y
+          CONFIG_PACKAGE_libjson-script20251208=y
+          CONFIG_PACKAGE_libjson-script20260213=y
+          CONFIG_PACKAGE_liblua5.1.5=y
+          CONFIG_PACKAGE_liblucihttp-ucode=y
+          CONFIG_PACKAGE_liblucihttp0=y
+          CONFIG_PACKAGE_libmbedtls21=y
+          CONFIG_PACKAGE_libmnl0=y
+          CONFIG_PACKAGE_libmount1=y
+          CONFIG_PACKAGE_libncurses6=y
+          CONFIG_PACKAGE_libnftnl11=y
+          CONFIG_PACKAGE_libnl-tiny1=y
+          CONFIG_PACKAGE_libopenssl3=y
+          CONFIG_PACKAGE_libopenssl-conf=y
+          CONFIG_PACKAGE_libopenssl-legacy=y
+          CONFIG_PACKAGE_libpng=y
+          CONFIG_PACKAGE_libpthread=y
+          CONFIG_PACKAGE_librt=y
+          CONFIG_PACKAGE_libsmartcols1=y
+          CONFIG_PACKAGE_libsqlite3-0=y
+          CONFIG_PACKAGE_libss2=y
+          CONFIG_PACKAGE_libubox20251208=y
+          CONFIG_PACKAGE_libubox20260213=y
+          CONFIG_PACKAGE_libubus20251202=y
+          CONFIG_PACKAGE_libuci20250120=y
+          CONFIG_PACKAGE_libuclient20201210=y
+          CONFIG_PACKAGE_libucode20230711=y
+          CONFIG_PACKAGE_libudebug=y
+          CONFIG_PACKAGE_libusb-1.0-0=y
+          CONFIG_PACKAGE_libustream-openssl20201210=y
+          CONFIG_PACKAGE_libuuid1=y
+          CONFIG_PACKAGE_libwebp=y
+          CONFIG_PACKAGE_libxtables12=y
+          EOF
+
+      # ── 7. Patch model name in DTS ────────────────────────────────────────
+      - name: Patch model name in DTS
+        working-directory: openwrt
+        run: |
+          DTS="target/linux/mediatek/dts/mt7986a-jiorouter-ax6000-jidu6101.dts"
+          DTSI="target/linux/mediatek/dts/mt7986a-jiorouter-common.dtsi"
+          for FILE in "$DTS" "$DTSI"; do
+            if [ -f "$FILE" ]; then
+              echo "Patching: $FILE"
+              sed -i 's/model = "[^"]*"/model = "JioHome Router [ManavRajIN Edition]"/' "$FILE"
+              grep 'model = ' "$FILE" || true
+            else
+              echo "Not found: $FILE"
+            fi
+          done
+
+      # ── 8. Run defconfig to resolve dependencies ───────────────────────────
+      - name: Run make defconfig
+        working-directory: openwrt
+        run: make defconfig
+
+      # ── 9. Download package sources ───────────────────────────────────────
+      - name: Download sources
+        working-directory: openwrt
+        run: make download -j$(nproc) V=s 2>&1 | tee /tmp/download.log
+        continue-on-error: true  # Some sources may fail; build continues
+
+      # ── 10. Build firmware ─────────────────────────────────────────────────
+      - name: Build firmware
+        working-directory: openwrt
+        run: |
+          make -j$(nproc) V=s 2>&1 | tee /tmp/build.log
+          echo "Build exit code: $?"
+
+      # ── 11. Retry single-threaded on failure ──────────────────────────────
+      - name: Retry single-threaded on failure
+        if: failure()
+        working-directory: openwrt
+        run: make -j1 V=s 2>&1 | tail -100
+
+      # ── 12. Collect output images ──────────────────────────────────────────
+      - name: Collect firmware images
+        if: success()
+        run: |
+          mkdir -p firmware
+          find openwrt/bin/targets/mediatek/filogic/ \
+            -name "*.bin" -o -name "*.ubi" -o \
+            -name "*sysupgrade*" -o -name "*initramfs*" \
+            | xargs -I{} cp {} firmware/
+          ls -lh firmware/
+
+      # ── 13. Upload firmware as artifact ───────────────────────────────────
+      - name: Upload firmware
+        uses: actions/upload-artifact@v4
+        with:
+          name: openwrt-jiorouter-ax6000-${{ github.run_number }}
+          path: firmware/
+          retention-days: 30
+
+      # ── 14. Upload build log on failure ───────────────────────────────────
+      - name: Upload build log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log-${{ github.run_number }}
+          path: /tmp/build.log
+          retention-days: 7
